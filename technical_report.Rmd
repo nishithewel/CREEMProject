@@ -10,52 +10,7 @@ editor_options:
 
 
 -   
-
-
-
-```{python}
-
-# Run this to scrape data
-# %pip install snscrape
-# importing libraries and packages
-import snscrape.modules.twitter as sntwitter
-import pandas as pd
-
-users = ['creem_cake','ExeterMarine','@UofE_Research',
-        'oaggimenez','_SMRU_','BrendanGodley','BritishEcolSoc']
-# Creating list to append tweet data 
-tweetJSON = []
-data = []
-for user in  users:
-# Using TwitterSearchScraper to scrape data and append tweets to list
-    for i,tweet in enumerate(sntwitter.TwitterSearchScraper(f'from:{user} since:2019-05-01').get_items()): #declare a username 
-
-        data.append([tweet.date,
-                            tweet.id, 
-                            tweet.content,
-                            tweet.user.username,
-                            tweet.url,
-                            tweet.renderedContent,
-                            tweet.media,
-                            tweet.likeCount,
-                            tweet.replyCount,
-                            tweet.retweetCount,
-                            tweet.hashtags
-                            ]) #declare the attributes to be returned
-        tweetJSON.append(tweet.json())
-
-# Creating a dataframe from the tweets list above
-tweets_df1 = pd.DataFrame(data, columns=['Datetime', 'Tweet Id', 'content',
-                                                'Username','url','renderedContent','media',
-                                                'likeCount','replyCount','retweetCount','hashtags'])
-                                                
-tweets_df1.to_csv('tweet_data.csv')
-
-#dump to json
-import json
-with open('twitterdata.json', 'w') as f:
-    json.dump(tweetJSON, f)
-```
+# CREEM Social Media Analysis R code
 
 ```{r}
 library(tidyverse)
@@ -101,7 +56,7 @@ g + geom_col() +
 # legend.position=”none”
 # plot(x = profile_ts$date,y = profile_ts$New.followers)== 
 ```
-Why was there a spike in follower?
+Why was there a spike in followers?
 ### How often have we been posting in this period?
 
 ```{r}
@@ -222,8 +177,6 @@ head(creem_tweets %>% arrange(desc(likeCount)) %>% select(renderedContent, likeC
 head( creem_tweets %>% arrange(desc(retweetCount)) %>% 
        select(content, retweetCount,url),
      10)
-# library(tweetrmd)
-# tweet_embed("https://twitter.com/alexpghayes/status/1211748406730706944")
 
 ```
 
@@ -252,9 +205,10 @@ Overall, reply counts are too low to be meaningful on our account.
 ### How do other accounts drive conversation?
 
 ```{r}
-top.replies <- tweets %>% group_by(Username) %>% slice_max(replyCount,n = 2) %>% 
-       select(Username, renderedContent, replyCount,url) %>%
-       filter(Username != "CREEM_cake") 
+top.replies <- tweets %>% group_by(Username) %>%
+      slice_max(replyCount, n = 2) %>% 
+       select(Username, renderedContent, replyCount, url) %>%
+       filter(Username != "CREEM_cake")
 top.replies
 
 ```
@@ -288,10 +242,10 @@ hashtag_df <- tweets %>% group_by(Username, isHashtag) %>%
 
 hashtag_df %>% 
   mutate(Username = as.factor(Username)) %>% 
-  arrange(isHashtag,freq) %>%#didnt work
+  arrange(isHashtag, freq) %>%#didnt work
   ggplot(
          aes(y = freq, x = Username, fill = isHashtag, color = isHashtag)) +
-    geom_bar(stat='identity') + 
+    geom_bar(stat = "identity") + 
     labs(title = "% of Posts using Hashtags by Account",
          x = "", y = "Frequency") 
   coord_flip()
