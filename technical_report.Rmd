@@ -1,0 +1,650 @@
+---
+title: "CREEM Social Media Analysis R code"
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+
+-   
+
+
+
+```{python}
+
+# Run this to scrape data
+# %pip install snscrape
+# importing libraries and packages
+import snscrape.modules.twitter as sntwitter
+import pandas as pd
+
+users = ['creem_cake','ExeterMarine','@UofE_Research',
+        'oaggimenez','_SMRU_','BrendanGodley','BritishEcolSoc']
+# Creating list to append tweet data 
+tweetJSON = []
+data = []
+for user in  users:
+# Using TwitterSearchScraper to scrape data and append tweets to list
+    for i,tweet in enumerate(sntwitter.TwitterSearchScraper(f'from:{user} since:2019-05-01').get_items()): #declare a username 
+
+        data.append([tweet.date,
+                            tweet.id, 
+                            tweet.content,
+                            tweet.user.username,
+                            tweet.url,
+                            tweet.renderedContent,
+                            tweet.media,
+                            tweet.likeCount,
+                            tweet.replyCount,
+                            tweet.retweetCount,
+                            tweet.hashtags
+                            ]) #declare the attributes to be returned
+        tweetJSON.append(tweet.json())
+
+# Creating a dataframe from the tweets list above
+tweets_df1 = pd.DataFrame(data, columns=['Datetime', 'Tweet Id', 'content',
+                                                'Username','url','renderedContent','media',
+                                                'likeCount','replyCount','retweetCount','hashtags'])
+                                                
+tweets_df1.to_csv('tweet_data.csv')
+
+#dump to json
+import json
+with open('twitterdata.json', 'w') as f:
+    json.dump(tweetJSON, f)
+```
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+```
+
+### How has our following grown since 2019?
+
+Using data scraped from Twitter Analytics, we can build a time series of
+how we have built a community on twitter. Observing the followers
+manually, it is likely that the majority is not students of st Andrews
+or other universities but mostly researchers and academics following
+CREEM research.
+
+This data is only accessible for the CREEM_cake account, hence
+incomparable with our peers.
+
+```{r}
+profile_ts <- read.csv('data/creem_data.csv',col.names = c('date','New.followers')) %>% 
+  # rename(date = ï..date) %>% 
+  mutate(date = as.Date(date)) %>% 
+  filter(date > as.Date('2019-01-01'))
+                   
+# head(profile_ts)
+coeff <- 0.5
+g <- ggplot(profile_ts, 
+            aes(x = date, y = New.followers/coeff)) 
+
+g + geom_col() + 
+  labs(title = "Follower Growth in the Last 3 years",
+       x="") +
+  geom_line(aes(x = date, y = cumsum(New.followers), 
+                color = 'CREEM_cake'
+                )) +
+   scale_y_continuous(
+    # Features of the first axis
+    name = "Cumalitve Follower growth",
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*coeff, name="New followers")
+  ) +
+  theme(legend.title=element_blank())
+# legend.position=”none”
+# plot(x = profile_ts$date,y = profile_ts$New.followers)== 
+```
+Why was there a spike in follower?
+### How often have we been posting in this period?
+
+```{r}
+#loading the data Scraped from SNScrape
+tweets <-  read.csv('data/tweet_data.csv') %>% 
+                mutate(dt= ymd_hms(Datetime),
+                       Tweet.Id = as.character(Tweet.Id),
+                       year_month = floor_date(as.Date(Datetime),
+                                               unit = "month"),
+                       year_week = floor_date(as.Date(Datetime),
+                                               unit = "week"),
+                       time = format(Datetime, format = "%H:%M:%S"),
+                       #round time to nearest qtr
+                       time_30 = format(round_date(dt, "30 minutes"),
+                                        format = "%H:%M:%S"),
+                      
+                       #remove open close brackets
+                       hashtags = gsub("\\[|\\]|\\'","",hashtags) 
+                       )
+summary(tweets)
+```
+
+```{r}
+
+monthly_posts <- tweets %>% group_by(Username) %>% count(year_month) 
+weekly_posts <- tweets %>% group_by(Username) %>% count(year_week) 
+
+follower_ts <- ggplot(monthly_posts,aes(x = year_month, y = n , group = Username,
+                        color = Username)) 
+follower_ts + 
+  geom_smooth(se = F) +
+  # geom_point()+
+  labs(title = " Posts per Month (smoothed)", y = "", x = "") + 
+  geom_vline(xintercept = as.numeric(as.Date("2020-03-01")),
+                                      linetype=4, colour="black")
+```
+
+### Taking a closer look at the CREEM_cake account
+
+The black line in figure shows the start of WFH, this confirms the stark
+decrease in social media activity due to changes in priority.
+Unfortunately, this trend has continued until now.
+
+```{r}
+creem_ts <- ggplot(monthly_posts %>% filter(Username == "CREEM_cake"),
+                   aes(x = year_month, y = n , group = Username,
+                       color = 'Monthly Posts'))  +
+  geom_line() 
+creem_ts  + 
+  geom_point(data = weekly_posts %>% filter(Username == "CREEM_cake"),
+             aes(x = year_week, y = n, color = "Weekly Posts" )) + 
+  labs(title = " Posts per Month for CREEM", y = "", x= "") + 
+  #line marking beginning of WFH
+  geom_vline(xintercept = as.numeric(as.Date("2020-03-01")),
+                                      linetype=4, colour="black")+
+theme(legend.title=element_blank())
+  
+ 
+```
+
+### Does posting more increase follower count?
+
+Assuming a poisson error model, we construct a GLM to model the
+relationship between how often we post and how many new followers we
+get.
+
+```{r}
+creem_monthly <- monthly_posts %>% #because follower data is monthly
+  mutate(date = year_month) %>%
+  filter(Username == "CREEM_cake")
+
+#join both datasets
+merged_df <- merge(creem_monthly, profile_ts, by = "date") %>% 
+  rename(posts.permonth = n)
+
+merged_df%>% 
+  ggplot(aes(x = posts.permonth, y = New.followers)) + geom_point()
+#glm?
+```
+
+```{r}
+follower.fit <- glm(New.followers ~ posts.permonth, data = merged_df, family = "poisson")
+# anova(follower.fit, test = 'Chisq')
+summary(follower.fit)
+```
+
+The p - value for the number of posts is significant. From this we
+conclude that posting more regularly
+
+#TODO!
+
+## What content have we been posting up to now?
+
+What has worked in the past can be useful to understand what works for
+our audience. And it helps to take inspiration from others.
+
+### What do people like?
+
+Looking at the actual text content of the top 10 most liked posts on the
+CREEM account, we broadly identify the following trends/categories,
+
+-   Hiring!
+-   Congratulations on a hire or a paper
+-   Paper Alerts
+
+```{r}
+creem_tweets <-  tweets %>% filter(Username == "CREEM_cake") 
+
+head(creem_tweets %>% arrange(desc(likeCount)) %>% select(renderedContent, likeCount,url),
+     10)
+
+```
+
+### What spreads the word? In terms of retweets
+
+```{r}
+
+head( creem_tweets %>% arrange(desc(retweetCount)) %>% 
+       select(content, retweetCount,url),
+     10)
+# library(tweetrmd)
+# tweet_embed("https://twitter.com/alexpghayes/status/1211748406730706944")
+
+```
+
+Clearly, our following is very excited about hiring; 7 out of 10 of our
+most retweeted posts are about Job postings.
+```{r}
+#how many posts are about papers?
+tweets %>% filter(
+  Username== 'CREEM_cake',
+                  str_detect(content, regex("paper|research",ignore_case = F)))
+```
+
+
+### What starts a conversation? Looking at replies
+
+```{r}
+
+head(tweets %>% arrange(desc(replyCount)) %>% 
+       filter(Username == 'CREEM_cake') %>% 
+       select(content, replyCount,url),
+     10)
+```
+
+Overall, reply counts are too low to be meaningful on our account.
+
+### How do other accounts drive conversation?
+
+```{r}
+top.replies <- tweets %>% group_by(Username) %>% slice_max(replyCount,n = 2) %>% 
+       select(Username, renderedContent, replyCount,url) %>%
+       filter(Username != "CREEM_cake") 
+top.replies
+
+```
+
+### #Hashtags and Media:
+
+Due to the inteaction between Hashtags and Media we choose to look and
+non-text content
+
+together.
+
+#### How often do we use hashtags, in comparison with other accounts?
+
+We have the least number of hashtagged tweets compared to other
+institutional accounts.
+
+```{r}
+#just checking for balance
+tweets <- tweets %>% mutate(
+  #create a column with T/F if hashtagged
+  isHashtag = ifelse(hashtags != "", "Yes","No"),
+  #columns with TF if contatins photo or GIF
+  isMedia = ifelse(media != "", "Yes","No" )
+)
+
+hashtag_df <- tweets %>% group_by(Username, isHashtag) %>% 
+  summarise(avgLikes = mean(likeCount),
+            n = n(),
+            ) %>%
+  mutate(freq = n / sum(n))
+
+hashtag_df %>% 
+  mutate(Username = as.factor(Username)) %>% 
+  arrange(isHashtag,freq) %>%#didnt work
+  ggplot(
+         aes(y = freq, x = Username, fill = isHashtag, color = isHashtag)) +
+    geom_bar(stat='identity') + 
+    labs(title = "% of Posts using Hashtags by Account",
+         x = "", y = "Frequency") 
+  coord_flip()
+
+```
+
+Before we consider which #s we **should** use, we consider what hashtags
+are used the most in our sample?
+
+```{r}
+hashtag.likes  <- tweets %>% separate_rows(hashtags) %>% 
+  group_by(hashtags) %>% 
+  summarise(meanlikes = mean(likeCount),
+            n = n(),
+            # freq = n
+            score = log(n)*meanlikes) %>%
+  mutate(freq = n / sum(n)) %>% 
+  filter(hashtags != "",n > 10) %>%
+  slice_max(freq, n = 20) %>%
+              arrange(desc(freq))
+  
+
+
+p <- ggplot(hashtag.likes,
+            aes(x = reorder(hashtags, freq),
+            # x = 
+                y = freq))
+p + geom_bar(stat='identity') + 
+  labs(x = "", y= "Frequency of use",
+       title = "Top 20 most used #s in sample")+
+  coord_flip()
+
+```
+
+### But, do tweets with hashtags actually perform better?
+
+We combine this analysis with the use of media as well.
+
+```{r}
+media_df <-   tweets %>% group_by(Username, isMedia) %>% 
+  summarise(avgLikes = mean(likeCount),
+            n = n(),
+            ) %>%
+  mutate(freq = n / sum(n))
+media_df %>% 
+  ggplot(
+         aes(y = freq, x = Username, fill = isMedia, color = isMedia)) +
+    geom_bar(stat='identity') + 
+    labs(title = "% of Posts using Media by Account",
+         x = "", y = "Frequency") 
+  coord_flip()
+  
+```
+
+
+```{r}
+avg.likes.Media <- tweets %>% 
+  mutate(isMedia = ifelse(isMedia== 'No',
+                              'Doesn\'t use media','Uses media')) %>% 
+  group_by(isHashtag, isMedia) %>% 
+  summarise(avgLikes = mean(likeCount),
+            medianlikes = median(likeCount),
+            n = n(),
+            )  
+
+avg.likes.Media %>%  ggplot(aes(
+  # x = interaction(isHashtag,isMedia),
+  
+  x = isHashtag,
+  y = avgLikes,
+             fill = isHashtag, color = isHashtag), ) + 
+  geom_col() +
+  facet_grid(cols = vars(isMedia)
+  ) + 
+  labs(title = "Mean likes hashtag and media use",
+       x = "Uses Hashtags")
+
+# ggplot(data = hashtag_df, 
+#        aes(y = avgLikes, x = Username, fill = isHashtag, color = isHashtag)) +
+#   geom_point() +
+#   labs(title = "Mean Likes by Username and # use")
+```
+```{r}
+avg.likes.Media %>% mutate(avg.increase.likes = ( avgLikes/5.533798	) - 1#No media/hashtag
+                           )
+```
+
+
+On average, the use of hashtags correlates with an increase in likes on posts by 47% on posts
+for without media!
+For posts with Media but no hashtags it correlates with an increase of 142% !
+When you include Media along side a hashtag it correlates with an increase of a
+staggering 162%.
+
+Breaking this relationship down by username,
+
+```{r}
+ggplot(data = hashtag_df, 
+       aes(y = avgLikes, x = Username, fill = isHashtag, color = isHashtag)) +
+  geom_point() + 
+  labs(title = "Mean Likes by Username and Hashtag use")+ 
+  coord_flip()
+```
+
+The figure above could indicate that some accounts use hashtags better
+but this is inconclusive, due to the interaction between the % of
+hashtag use. i.e UofE_Research posts a lot more posts with #s but has
+the smallest difference in posts with #s and not.
+
+#### Similarly, we consider media use
+
+```{r}
+
+ggplot(data = media_df, 
+       aes(y = avgLikes, x = Username, fill = isMedia, color = isMedia)) +
+  geom_point() + 
+  labs(title = "Mean Likes by Username and Media use")
+
+```
+maybe 
+
+Media use performs better across the board.
+
+```{r}
+ggplot(data = tweets %>% group_by(Username, isHashtag) %>% filter(likeCount > 0), 
+       aes(y = log(likeCount), #using log to minimise effect of outliers
+           x = Username, color = isHashtag)) +
+  geom_boxplot() + 
+  labs(title = " Boxplot of  log(Likes) by Username and # use ")
+```
+
+```{r}
+ggplot(data = tweets %>% group_by(isHashtag) %>% filter(likeCount > 0), 
+       aes(y = log(likeCount), #using log to minimise effect of outliers
+           x = isHashtag, fill = isHashtag, color = isHashtag)) +
+  geom_boxplot() + 
+  labs(title = "Likes by Username and # use")
+```
+
+Is this significant?
+
+To model the effect of Hashtags and Media on likeCount we use a Poisson
+GLM.
+
+Based on the Distribution of log(likes), we assume it follows a gamma
+distribution.
+
+```{r}
+ggplot(data = tweets %>% group_by(isHashtag) %>%
+         filter(likeCount > 5), # to remove infrquently used outliers
+       aes(x = log(likeCount), #using log to minimise effect of outliers
+           # fill = isHashtag,
+           color = isHashtag)) +
+  # geom_histogram() + 
+  # geom_freqpoly() +
+  geom_density()+
+  labs(title = "Distribution of Log(likes)")
+```
+
+```{r}
+#plot the distribution of loglike counts?
+
+#%>% group_by(isHashtag) %>% filter(likeCount > 0)
+lmfit <- glm(log(likeCount) ~ as.factor(isHashtag)*as.factor(isMedia), 
+             data = tweets %>% filter(likeCount > 5), family = 'Gamma')
+
+anova(lmfit,test = "Chi")
+```
+
+In conclusion, hashtags clearly have an effect.
+
+#### So which ones do we use?
+
+Which hashtags have the biggest effect on likes?
+
+Looking at the hashtags on each post for all users, we come up with the
+top 5.
+
+```{r}
+ggplot(hashtag.likes,
+       aes(x = meanlikes, y = log(n) )) + geom_point()
+```
+
+We clearly need a use penalised measure for this, i.e. we cant use David
+Attenborough for every post
+
+We define a measure that balances widespread use and effectivity in
+terms of likes as $log_e(n) * meanLikes$
+```{r}
+hashtag.likes %>% slice_max(score,n = 20
+                            )
+```
+How many hashtags do you need to perform well?
+```{r}
+tweets <- tweets %>% mutate(n.hashtags = ifelse(isHashtag=='Yes',
+                                                lengths(str_split(hashtags,",")),
+                                                0))#return 0 if not hashtags
+tweets %>% 
+  group_by(n.hashtags) %>%
+  # summarise(mean_likes = median(likeCount)) %>% 
+  filter(n.hashtags < 8,
+         likeCount > 0 #for log conversion
+         ) %>% #
+  
+  ggplot(aes(x= as.factor(n.hashtags), y= log(likeCount), color = isMedia)) + 
+  labs(x = "Number of Hashtags",
+       title = "Boxplot of log(likes) vs num hashtags")+
+  geom_boxplot()
+```
+
+### Whats the best time to tweet?
+
+Time relationship with likes
+
+```{r}
+likes.in.day <- tweets %>% group_by(Username, time_30) %>% 
+  summarise(avg_likes = mean(likeCount),   
+            median_likes = median(likeCount),
+            n = n())
+
+p <- ggplot(data = likes.in.day ,
+            aes(x =  as.POSIXct(time_30,format="%H:%M"),
+                y = n, 
+                color = Username, group = Username))  
+p +
+  # geom_point()
+  geom_smooth(se = F) +
+  # geom_ma(ma_fun = SMA, n= 4) + 
+  labs(title = "What times do people usually post?",
+       x= "Time of day")
+
+```
+```{r}
+p <- ggplot(data = likes.in.day ,
+            aes(x =  as.POSIXct(time_30,format="%H:%M"),
+                y = median_likes, 
+                color = Username, group = Username))  
+p +
+  # geom_point()
+  geom_smooth(se = F) +
+  # geom_ma(ma_fun = SMA, n= 4) + 
+  labs(title = "How does post time affect the num likes it gets?",
+       y = "Median likes",
+       x= "Time of day")
+```
+No clear sign of what time to post based on our followers.
+But since all the account are on the same timezone maybe we can aggregate?
+```{r}
+
+tweets %>% group_by( time_30) %>% 
+  summarise(avg_likes = mean(likeCount),   
+            median_likes = median(likeCount),
+            n = n()) %>% 
+  ggplot(aes(x= as.POSIXct(time_30,format="%H:%M"),
+             y = avg_likes))+ 
+   geom_smooth(se = F)
+  # geom_line(aes(y = avg_likes))
+```
+What if we include day of week?
+```{r}
+library(zoo)
+library(tidyquant)
+```
+Num tweets by day?
+```{r}
+tweets <- tweets %>% mutate(
+   day.week = wday(Datetime, week_start=1,label=TRUE
+                   )) 
+tweets%>% 
+  filter(Username == "CREEM_cake",
+         # likeCount < 50  #just to make plot cleaner
+         ) %>%
+  
+  group_by(Username,day.week) %>%
+  summarise(avg_likes = mean(likeCount),
+  #           median_likes = median(likeCount),
+            n = n()) %>%
+  ggplot(aes(
+    # x =  as.POSIXct(time_30,format="%H:%M"),
+    x = as.factor(day.week),
+       y = n,
+    fill = Username
+       # color = Username,
+    # group = Username
+         )) + 
+  # facet_grid(cols = vars(day.week))+ 
+  # geom_line(aes(y=rollmean(median_likes, 3, na.pad=TRUE)))
+  geom_col()+ 
+  labs(title = "Number of CREEM tweets by day of week",
+       y = "Number of posts",
+       x = "")
+  # geom_histogram(stat= 'identity')
+```
+
+
+```{r}
+tweets <- tweets %>% mutate(
+   day.week = wday(Datetime, week_start=1,label=TRUE
+                   )) 
+tweets%>% 
+  filter(
+  Username == "CREEM_cake",
+  # day.week == 'Mon'
+  ) %>% 
+  group_by(Username,day.week, time_30) %>% 
+  summarise(avg_likes = mean(likeCount),   
+            median_likes = median(likeCount),
+            n = n()) %>% 
+  ggplot(aes(x =  as.POSIXct(time_30,format="%H:%M"), 
+         y = median_likes,
+         color = Username, group = Username
+         )) + 
+  facet_grid(rows = vars(day.week))+ 
+  
+  # geom_line(aes(y=rollmean(median_likes, 3, na.pad=TRUE)))
+  geom_line()
+  
+```
+```{r}
+tweets%>% 
+  filter(Username == "CREEM_cake",
+         likeCount < 50  #just to make plot cleaner
+         ) %>%
+  
+
+  ggplot(aes(
+    # x =  as.POSIXct(time_30,format="%H:%M"),
+    x = as.factor(day.week),
+       y = likeCount,
+       color = day.week,
+    # group = Username
+         )) + 
+  # facet_grid(cols = vars(day.week))+ 
+  # geom_line(aes(y=rollmean(median_likes, 3, na.pad=TRUE)))
+  geom_boxplot() + 
+  labs(title = "Boxplot of Likes by Day of Week",
+       x = "")
+```
+```{r}
+tweets%>% 
+  filter(Username == "CREEM_cake",
+         likeCount < 50  #just to make plot cleaner
+         ) %>%
+   mutate(
+    isweekend = ifelse(
+      day.week =='Sat'|day.week=='Sun','Yes','No')) %>% 
+#   
+  group_by(Username,isweekend) %>%
+  summarise(avg_likes = mean(likeCount),
+            median_likes = median(likeCount),
+            n = n())
+
+```
+
+
+
