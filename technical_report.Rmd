@@ -12,6 +12,46 @@ editor_options:
 -   
 # CREEM Social Media Analysis R code
 
+```{python}
+# Run to activate the scraper
+import snscrape.modules.twitter as sntwitter
+import pandas as pd
+
+users = ['creem_cake','ExeterMarine','@UofE_Research',
+        'oaggimenez','_SMRU_','BrendanGodley','BritishEcolSoc']
+start_date = '2019-01-01'
+# Creating list to append tweet data 
+tweetJSON = []
+data = []
+for user in  users:
+# Using TwitterSearchScraper to scrape data and append tweets to list
+    for i,tweet in enumerate(
+        sntwitter.TwitterSearchScraper(
+            f'from:{user} since:{start_date}' #specify start date
+            ).get_items()): #declare a username 
+
+        data.append([tweet.date,
+                            tweet.id, 
+                            tweet.content,
+                            tweet.user.username,
+                            tweet.url,
+                            tweet.renderedContent,
+                            tweet.media,
+                            tweet.likeCount,
+                            tweet.replyCount,
+                            tweet.retweetCount,
+                            tweet.hashtags
+                            ]) #declare the attributes to be returned
+        tweetJSON.append(tweet.json())
+
+# Creating a dataframe from the tweets list above
+tweets_df = pd.DataFrame(data, columns=['Datetime', 'Tweet Id', 'content',
+                                                'Username','url','renderedContent','media',
+                                                'likeCount','replyCount','retweetCount','hashtags'])
+                                                
+tweets_df.to_csv('tweet_data.csv')
+
+```
 ```{r}
 library(tidyverse)
 library(dplyr)
